@@ -77,11 +77,33 @@
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
@@ -91,6 +113,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DrvEntry.cpp" />
+    <ClCompile Include="IoCreateDriver.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="IoCreateDriver.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -22,5 +22,13 @@
     <ClCompile Include="DrvEntry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="IoCreateDriver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="IoCreateDriver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

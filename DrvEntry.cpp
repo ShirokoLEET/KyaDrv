@@ -1,13 +1,17 @@
-#include <ntddk.h>
+#include <ntifs.h>
+#include "IoCreateDriver.h"
 
 #define DRIVER_PREFIX "KyaDrv: "
 
-// ø…—°£∫◊‘∂®“Â≥ÿ±Í«©
+// ÂèØÈÄâÔºöËá™ÂÆö‰πâÊ±†Ê†áÁ≠æ
 #ifndef KYADRV_TAG
-#define KYADRV_TAG 'ayK' // 'Kya' µƒ∑¥–Ú◊÷Ω⁄–Ú
+#define KYADRV_TAG 'ayK' // 'Kya' ÁöÑÂèçÂ∫èÂ≠óËäÇÂ∫è
 #endif
 
-// ÕÍ≥… IRP µƒ–°π§æﬂ∫Ø ˝
+// ÂÖ®Â±ÄÁ¨¶Âè∑ÈìæÊé•ÂêçÁß∞Ôºå‰æõ DriverEntry ‰∏é DriverUnload ÂÖ±‰∫´
+static UNICODE_STRING g_SymLink = RTL_CONSTANT_STRING(L"\\DosDevices\\KyaDrv");
+
+// ÂÆåÊàê IRP ÁöÑÂ∞èÂ∑•ÂÖ∑ÂáΩÊï∞
 static NTSTATUS CompleteRequest(_In_ PIRP Irp, _In_ NTSTATUS Status, _In_ ULONG_PTR Information = 0) {
     Irp->IoStatus.Status = Status;
     Irp->IoStatus.Information = Information;
@@ -15,7 +19,7 @@ static NTSTATUS CompleteRequest(_In_ PIRP Irp, _In_ NTSTATUS Status, _In_ ULONG_
     return Status;
 }
 
-// ≤ª÷ß≥÷µƒ»± °∑÷∑¢
+// ‰∏çÊîØÊåÅÁöÑÁº∫ÁúÅÂàÜÂèë
 static NTSTATUS KyaDrvDispatchUnsupported(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_TRACE_LEVEL, DRIVER_PREFIX "Unsupported IRP: 0x%X\n",
@@ -23,13 +27,13 @@ static NTSTATUS KyaDrvDispatchUnsupported(_In_ PDEVICE_OBJECT DeviceObject, _In_
     return CompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST);
 }
 
-// Create/Close ∑µªÿ≥…π¶
+// Create/Close ËøîÂõûÊàêÂäü
 static NTSTATUS KyaDrvDispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
     return CompleteRequest(Irp, STATUS_SUCCESS);
 }
 
-// DeviceIoControl »± °Œ™≤ª÷ß≥÷£®∫Û–¯ø…‘⁄¥À µœ÷ IOCTL£©
+// DeviceIoControl Áº∫ÁúÅ‰∏∫‰∏çÊîØÊåÅÔºàÂêéÁª≠ÂèØÂú®Ê≠§ÂÆûÁé∞ IOCTLÔºâ
 static NTSTATUS KyaDrvDispatchDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
     return CompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST);
@@ -41,43 +45,41 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
     PAGED_CODE();
     UNREFERENCED_PARAMETER(DriverObject);
 
-    // »Ù∫Û–¯¥¥Ω®¡À…Ë±∏∂‘œÛ”Î∑˚∫≈¡¥Ω”£¨«Î‘⁄¥À…æ≥˝£∫
-    // IoDeleteSymbolicLink(&symLink);
-    // IoDeleteDevice(DriverObject->DeviceObject);
+    // Âà†Èô§Á¨¶Âè∑ÈìæÊé•‰∏éËÆæÂ§á
+    IoDeleteSymbolicLink(&g_SymLink);
+    if (DriverObject->DeviceObject) {
+        IoDeleteDevice(DriverObject->DeviceObject);
+    }
 
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "Unload\n");
 }
 
-extern "C"
-NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
-{
+static NTSTATUS __fastcall KyaDrvInitialize(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath);
 
-    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "DriverEntry\n");
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "KyaDrvInitialize via IoCreateDriver\n");
 
-    // …Ë÷√»± °∑÷∑¢
+    // ËÆæÁΩÆÁº∫ÁúÅÂàÜÂèë
     for (UINT32 i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; ++i) {
         DriverObject->MajorFunction[i] = KyaDrvDispatchUnsupported;
     }
 
-    // …Ë÷√±ÿ“™∑÷∑¢
+    // ËÆæÁΩÆÂøÖË¶ÅÂàÜÂèë
     DriverObject->MajorFunction[IRP_MJ_CREATE] = KyaDrvDispatchCreateClose;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = KyaDrvDispatchCreateClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KyaDrvDispatchDeviceControl;
 
-    // –∂‘ÿ¿˝≥Ã
+    // Âç∏ËΩΩ‰æãÁ®ã
     DriverObject->DriverUnload = DriverUnload;
 
-    // »Á–Ë¥¥Ω®…Ë±∏”Î∑˚∫≈¡¥Ω”£¨ø…‘⁄¥ÀÃÌº”£® æ¿˝£¨ƒ¨»œ◊¢ Õ£©£∫
-    /*
+    // ÂàõÂª∫ËÆæÂ§á‰∏éÁ¨¶Âè∑ÈìæÊé•ÔºàÂ¶ÇÈúÄ IOCTL ÈÄöÈÅìÂèØÂèñÊ∂àÊ≥®ÈáäÔºâ
     NTSTATUS status = STATUS_SUCCESS;
     PDEVICE_OBJECT deviceObject = nullptr;
     UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\Device\\KyaDrv");
-    UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\DosDevices\\KyaDrv");
-
+    
     status = IoCreateDevice(
         DriverObject,
-        0,                  // …Ë±∏¿©’π¥Û–°
+        0,                  // ËÆæÂ§áÊâ©Â±ïÂ§ßÂ∞è
         &devName,
         FILE_DEVICE_UNKNOWN,
         FILE_DEVICE_SECURE_OPEN,
@@ -88,16 +90,26 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, DRIVER_PREFIX "IoCreateDevice failed: 0x%08X\n", status);
         return status;
     }
-
-    deviceObject->Flags |= DO_DIRECT_IO; // ªÚ DO_BUFFERED_IO£¨∞¥–Ë—°‘Ò
-
-    status = IoCreateSymbolicLink(&symLink, &devName);
+    
+    deviceObject->Flags |= DO_DIRECT_IO; // Êàñ DO_BUFFERED_IOÔºåÊåâÈúÄÈÄâÊã©
+    deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
+    
+    status = IoCreateSymbolicLink(&g_SymLink, &devName);
     if (!NT_SUCCESS(status)) {
         IoDeleteDevice(deviceObject);
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, DRIVER_PREFIX "IoCreateSymbolicLink failed: 0x%08X\n", status);
         return status;
     }
-    */
 
     return STATUS_SUCCESS;
+}
+
+extern "C"
+NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
+{
+    UNREFERENCED_PARAMETER(DriverObject);
+    UNREFERENCED_PARAMETER(RegistryPath);
+
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "DriverEntry -> IoCreateDriver proxy\n");
+    return IoCreateDriver(KyaDrvInitialize);
 }
