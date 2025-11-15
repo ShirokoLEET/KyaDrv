@@ -116,6 +116,12 @@
   <ItemGroup>
     <ClCompile Include="DrvEntry.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="cleaner.hpp" />
+    <ClInclude Include="import.hpp" />
+    <ClInclude Include="trace.hpp" />
+    <ClInclude Include="utils.hpp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

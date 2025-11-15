@@ -296,7 +296,7 @@ namespace trace
 						unloader_information& t = unloaders[i];
 						const wchar_t* sys = t.name.Buffer;
 
-						if (!sys || !MmIsAddressValid(sys))
+						if (!sys || !MmIsAddressValid((PVOID)sys))
 							continue;
 
 						DbgPrintEx(0, 0, "[%s] %.2d %ws \n", __FUNCTION__, i, sys);
