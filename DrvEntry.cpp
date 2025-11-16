@@ -34,7 +34,9 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	DeleteSelfDriverFile(DriverObject);
 
 	wchar_t name_buf[260] = { 0 };
+	wchar_t full_name_buf[512] = { 0 };
 	const wchar_t* target_name = kKyaDrvName;
+	const wchar_t* target_full_name = nullptr;
 	PLDR_DATA_TABLE_ENTRY ldrEntry = (PLDR_DATA_TABLE_ENTRY)DriverObject->DriverSection;
 	if (ldrEntry && ldrEntry->BaseDllName.Buffer && ldrEntry->BaseDllName.Length > 0)
 	{
@@ -46,23 +48,33 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 		name_buf[count] = L'\0';
 		target_name = name_buf;
 	}
+	if (ldrEntry && ldrEntry->FullDllName.Buffer && ldrEntry->FullDllName.Length > 0)
+	{
+		size_t count = ldrEntry->FullDllName.Length / sizeof(wchar_t);
+		const size_t buf_cap = RTL_NUMBER_OF(full_name_buf);
+		if (count >= buf_cap)
+			count = buf_cap - 1;
+		RtlCopyMemory(full_name_buf, ldrEntry->FullDllName.Buffer, count * sizeof(wchar_t));
+		full_name_buf[count] = L'\0';
+		target_full_name = full_name_buf;
+	}
 
 	{
-		auto ok = trace::clear_cache_by_name(target_name);
+		auto ok = trace::clear_cache_by_name(target_name, target_full_name);
 		DbgPrintEx(DPFLTR_IHVDRIVER_ID,
 			ok ? DPFLTR_INFO_LEVEL : DPFLTR_ERROR_LEVEL,
 			DRIVER_PREFIX "clear_cache_by_name(%ws): %s\n",
 			target_name, ok ? "success" : "failed");
 	}
 	{
-		auto ok = trace::clear_unloaded_driver(target_name);
+		auto ok = trace::clear_unloaded_driver(target_name, target_full_name);
 		DbgPrintEx(DPFLTR_IHVDRIVER_ID,
 			ok ? DPFLTR_INFO_LEVEL : DPFLTR_ERROR_LEVEL,
 			DRIVER_PREFIX "clear_unloaded_driver(%ws): %s\n",
 			target_name, ok ? "success" : "failed");
 	}
 	{
-		auto ok = trace::clear_hash_bucket_list(target_name);
+		auto ok = trace::clear_hash_bucket_list(target_name, target_full_name);
 		DbgPrintEx(DPFLTR_IHVDRIVER_ID,
 			ok ? DPFLTR_INFO_LEVEL : DPFLTR_ERROR_LEVEL,
 			DRIVER_PREFIX "clear_hash_bucket_list(%ws): %s\n",

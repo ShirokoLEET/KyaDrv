@@ -114,6 +114,102 @@ namespace trace
 
 			return 0;
 		}
+
+		inline unsigned long long find_hash_bucket_list(unsigned long long ci_address)
+		{
+			struct pattern_spec { const char* pattern; const char* mask; unsigned long offset; unsigned long instr_size; unsigned long disp_offset; };
+			const pattern_spec patterns[] =
+			{
+				{ "\x48\x8B\x1D\x00\x00\x00\x00\xEB\x00\xF7\x43\x40\x00\x20\x00\x00", "xxx????x?xxxxxxx", 0, 7, 3 },
+				{ "\x48\x8B\x0D\x00\x00\x00\x00\xEB\x00\xF7\x43\x40\x00\x20\x00\x00", "xxx????x?xxxxxxx", 0, 7, 3 }
+			};
+
+			for (const auto& spec : patterns)
+			{
+				auto address = utils::find_pattern_image(ci_address, spec.pattern, spec.mask);
+				if (address)
+				{
+					address += spec.offset;
+					return resolve_relative_address(address, spec.instr_size, spec.disp_offset);
+				}
+			}
+
+			return 0;
+		}
+
+		inline unsigned long long find_hash_cache_lock(unsigned long long ci_address)
+		{
+			const char* patterns[] =
+			{
+				"\x48\x8D\x0D\x00\x00\x00\x00\x48\xFF\x15\x00\x00\x00\x00\x0F\x1F\x44\x00\x00\x48\x8B\x1D\x00\x00\x00\x00\xEB",
+				"\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x4C\x8B\x1D\x00\x00\x00\x00\xEB",
+				"\x48\x8D\x0D\x00\x00\x00\x00\x48\xFF\x15\x00\x00\x00\x00\x90\x48\x8B\x1D\x00\x00\x00\x00"
+			};
+			const char* masks[] =
+			{
+				"xxx????xxx????xxxx?xxx????x",
+				"xxx????x????xxx????x",
+				"xxx????xxx????xxxx????"
+			};
+			const unsigned long instr_sizes[] = { 7, 7, 7 };
+			const unsigned long disp_offsets[] = { 3, 3, 3 };
+
+			for (size_t i = 0; i < RTL_NUMBER_OF(patterns); ++i)
+			{
+				auto address = utils::find_pattern_image(ci_address, patterns[i], masks[i]);
+				if (address)
+					return resolve_relative_address(address, instr_sizes[i], disp_offsets[i]);
+			}
+
+			auto base = utils::find_pattern_image(ci_address,
+				"\x48\x8B\x1D\x00\x00\x00\x00\xEB\x00\xF7\x43\x40\x00\x20\x00\x00",
+				"xxx????x?xxxxxxx");
+			if (base)
+			{
+				const unsigned long search_back = 0x80;
+				const unsigned long search_size = 0x140;
+				if (base > search_back)
+				{
+					auto candidate = utils::find_pattern(base - search_back, search_size, "\x48\x8D\x0D", "xxx");
+					if (candidate)
+						return resolve_relative_address(candidate, 7, 3);
+				}
+			}
+
+			return 0;
+		}
+
+		inline bool contains_name_insensitive(const wchar_t* text, const wchar_t* needle)
+		{
+			if (!text || !needle || *needle == L'\0')
+				return false;
+
+			for (const wchar_t* h = text; *h; ++h)
+			{
+				const wchar_t* h_it = h;
+				const wchar_t* n_it = needle;
+
+				while (*h_it && *n_it && RtlUpcaseUnicodeChar(*h_it) == RtlUpcaseUnicodeChar(*n_it))
+				{
+					++h_it;
+					++n_it;
+				}
+
+				if (*n_it == L'\0')
+					return true;
+
+				if (*h_it == L'\0')
+					break;
+			}
+
+			return false;
+		}
+
+		inline bool matches_driver_name(const wchar_t* text, const wchar_t* short_name, const wchar_t* full_name)
+		{
+			return contains_name_insensitive(text, short_name) ||
+				(full_name && contains_name_insensitive(text, full_name));
+		}
 	}
 
 	bool clear_cache(const wchar_t* name, unsigned long stamp)
@@ -180,9 +276,11 @@ namespace trace
 		return status;
 	}
 
-	bool clear_cache_by_name(const wchar_t* name)
+	bool clear_cache_by_name(const wchar_t* name, const wchar_t* alt_name = nullptr)
 	{
 		bool status = false;
+		bool scanned = false;
+		bool removed = false;
 
 		__try
 		{
@@ -208,9 +306,11 @@ namespace trace
 					BOOLEAN restart = TRUE;
 					ppiddb_cache_entry entry = (ppiddb_cache_entry)RtlEnumerateGenericTableAvl(table, restart);
 					restart = FALSE;
+					scanned = true;
 					while (entry)
 					{
-						if (entry->name.Buffer && wcsstr(entry->name.Buffer, name))
+						scanned = true;
+						if (entry->name.Buffer && detail::matches_driver_name(entry->name.Buffer, name, alt_name))
 						{
 							DbgPrintEx(0, 0, "[%s] removing %ws from PiDDBCacheTable\n", __FUNCTION__, entry->name.Buffer);
 
@@ -228,6 +328,7 @@ namespace trace
 									table->DeleteCount--;
 
 								status = true;
+								removed = true;
 							}
 
 							break;
@@ -247,12 +348,20 @@ namespace trace
 			DbgPrintEx(0, 0, "[%s] exception 0x%X\n", __FUNCTION__, GetExceptionCode());
 		}
 
+		if (!status && scanned && !removed)
+		{
+			DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[trace] PiDDB entry not found for %ws\n", name);
+			status = true;
+		}
+
 		return status;
 	}
 
-	bool clear_unloaded_driver(const wchar_t* name)
+	bool clear_unloaded_driver(const wchar_t* name, const wchar_t* alt_name = nullptr)
 	{
 		bool status = false;
+		bool randomized = false;
+		bool scanned = false;
 
 		__try
 		{
@@ -305,6 +414,7 @@ namespace trace
 					if (count > max_unloader_driver)
 						count = max_unloader_driver;
 
+					scanned = true;
 					for (unsigned long i = 0; i < count; i++)
 					{
 						if (!MmIsAddressValid(&unloaders[i]))
@@ -317,7 +427,8 @@ namespace trace
 							continue;
 
 						DbgPrintEx(0, 0, "[%s] %.2d %ws \n", __FUNCTION__, i, sys);
-						if (wcsstr(sys, name))
+						scanned = true;
+						if (detail::matches_driver_name(sys, name, alt_name))
 						{
 							DbgPrintEx(0, 0, "[%s] found unloader %ws driver \n", __FUNCTION__, t.name.Buffer);
 
@@ -328,6 +439,7 @@ namespace trace
 
 							DbgPrintEx(0, 0, "[%s] random string is %ws \n", __FUNCTION__, t.name.Buffer);
 							status = true;
+							randomized = true;
 						}
 					}
 				}
@@ -342,12 +454,20 @@ namespace trace
 			DbgPrintEx(0, 0, "[%s] exception 0x%X\n", __FUNCTION__, GetExceptionCode());
 		}
 
+		if (!status && scanned && !randomized)
+		{
+			DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[trace] MmUnloadedDrivers entry not found for %ws\n", name);
+			status = true;
+		}
+
 		return status;
 	}
 
-	bool clear_hash_bucket_list(const wchar_t* name)
+	bool clear_hash_bucket_list(const wchar_t* short_name, const wchar_t* full_name = nullptr)
 	{
 		bool status = false;
+		bool scanned = false;
+		bool removed = false;
 
 		__try
 		{
@@ -357,51 +477,49 @@ namespace trace
 			DbgPrintEx(0, 0, "[%s] ci address 0x%llx, size %ld\n", __FUNCTION__, ci_address, ci_size);
 			if (ci_address == 0 || ci_size == 0) return status;
 
-			unsigned long long KernelHashBucketList = utils::find_pattern_image(ci_address,
-				"\x48\x8B\x1D\x00\x00\x00\x00\xEB\x00\xF7\x43\x40\x00\x20\x00\x00",
-				"xxx????x?xxxxxxx");
+			unsigned long long KernelHashBucketList = detail::find_hash_bucket_list(ci_address);
 			if (KernelHashBucketList == 0) return status;
-			KernelHashBucketList = detail::resolve_relative_address(KernelHashBucketList, 7, 3);
 			DbgPrintEx(0, 0, "[%s] g_KernelHashBucketList address 0x%llx\n", __FUNCTION__, KernelHashBucketList);
 
-			unsigned long long HashCacheLock = utils::find_pattern_image(ci_address,
-				"\x48\x8D\x0D\x00\x00\x00\x00\x48\xFF\x15\x00\x00\x00\x00\x0F\x1F\x44\x00\x00\x48\x8B\x1D\x00\x00\x00\x00\xEB",
-				"xxx????xxx????xxxx?xxx????x");
+			unsigned long long HashCacheLock = detail::find_hash_cache_lock(ci_address);
 			if (HashCacheLock == 0) return status;
-			HashCacheLock = detail::resolve_relative_address(HashCacheLock, 7, 3);
 			DbgPrintEx(0, 0, "[%s] g_HashCacheLock address 0x%llx\n", __FUNCTION__, HashCacheLock);
 
 			if (ExAcquireResourceExclusiveLite((PERESOURCE)HashCacheLock, TRUE))
 			{
 				__try
 				{
-					// kdmapper 风格：g_KernelHashBucketList 是一个指向首节点指针的指针。
-					auto bucket_list = reinterpret_cast<phash_bucket_entry*>(KernelHashBucketList);
-					if (!bucket_list)
+					auto list_head = reinterpret_cast<phash_bucket_entry*>(KernelHashBucketList);
+					if (!list_head || !MmIsAddressValid(list_head))
 					{
 						DbgPrintEx(0, 0, "[%s] invalid g_KernelHashBucketList pointer\n", __FUNCTION__);
 					}
 					else
 					{
-						phash_bucket_entry current_entry = *bucket_list;
-						phash_bucket_entry* prev_link = bucket_list;
+						phash_bucket_entry prev_entry = nullptr;
+						phash_bucket_entry current_entry = *list_head;
 
-						while (current_entry)
+						while (current_entry && MmIsAddressValid(current_entry))
 						{
-							if (!current_entry->name.Buffer)
+							scanned = true;
+
+							if (!current_entry->name.Buffer || !MmIsAddressValid(current_entry->name.Buffer))
 							{
-								prev_link = &current_entry->next;
+								prev_entry = current_entry;
 								current_entry = current_entry->next;
 								continue;
 							}
 
 							DbgPrintEx(0, 0, "[%s] %ws 0x%x\n", __FUNCTION__, current_entry->name.Buffer, current_entry->hash[0]);
 
-							if (wcsstr(current_entry->name.Buffer, name))
+							if (detail::matches_driver_name(current_entry->name.Buffer, short_name, full_name))
 							{
 								DbgPrintEx(0, 0, "[%s] found %ws driver \n", __FUNCTION__, current_entry->name.Buffer);
 
-								*prev_link = current_entry->next;
+								if (prev_entry)
+									prev_entry->next = current_entry->next;
+								else
+									*list_head = current_entry->next;
 
 								current_entry->hash[0] = current_entry->hash[1] = 1;
 								current_entry->hash[2] = current_entry->hash[3] = 1;
@@ -409,10 +527,11 @@ namespace trace
 
 								ExFreePoolWithTag(current_entry, 0);
 								status = true;
+								removed = true;
 								break;
 							}
 
-							prev_link = &current_entry->next;
+							prev_entry = current_entry;
 							current_entry = current_entry->next;
 						}
 					}
@@ -428,11 +547,19 @@ namespace trace
 			DbgPrintEx(0, 0, "[%s] exception 0x%X\n", __FUNCTION__, GetExceptionCode());
 		}
 
+		if (!status && scanned && !removed)
+		{
+			DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[trace] g_KernelHashBucketList entry not found for %ws\n", short_name);
+			status = true;
+		}
+
 		return status;
 	}
 
 	bool clear_ci_ea_cache_lookaside_list()
 	{
+		//Maybe need a new sig
+		//Delay bcz we have no cer to load lol
 		bool status = false;
 
 		__try
@@ -454,11 +581,16 @@ namespace trace
 			PLOOKASIDE_LIST_EX g_CiEaCacheLookasideList = (PLOOKASIDE_LIST_EX)CiEaCacheLookasideList;
 			ULONG size = g_CiEaCacheLookasideList->L.Size;
 			ExDeleteLookasideListEx(g_CiEaCacheLookasideList);
-			if (NT_SUCCESS(ExInitializeLookasideListEx(g_CiEaCacheLookasideList, NULL, NULL, PagedPool, 0, size, 'csIC', 0)))
-			{
-				DbgPrintEx(0, 0, "[%s] clear g_CiEaCacheLookasideList \n", __FUNCTION__);
-				status = true;
-			}
+		NTSTATUS init_status = ExInitializeLookasideListEx(g_CiEaCacheLookasideList, NULL, NULL, PagedPool, 0, size, 'csIC', 0);
+		if (NT_SUCCESS(init_status))
+		{
+			DbgPrintEx(0, 0, "[%s] clear g_CiEaCacheLookasideList \n", __FUNCTION__);
+			status = true;
+		}
+		else
+		{
+			DbgPrintEx(0, 0, "[%s] ExInitializeLookasideListEx failed 0x%X\n", __FUNCTION__, init_status);
+		}
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
