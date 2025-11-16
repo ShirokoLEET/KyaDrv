@@ -147,7 +147,7 @@ namespace trace
 					ppiddb_cache_entry ret_entry = (ppiddb_cache_entry)RtlLookupElementGenericTableAvl((PRTL_AVL_TABLE)PiDDBCacheTable, &in_entry);
 					if (ret_entry)
 					{
-						DbgPrintEx(0, 0, "[%s] found %ws driver cache 0x%p \n", __FUNCTION__, ret_entry->name.Buffer, ret_entry->status);
+						DbgPrintEx(0, 0, "[%s] found %ws driver cache status 0x%08X \n", __FUNCTION__, ret_entry->name.Buffer, ret_entry->status);
 
 						PLIST_ENTRY prev = ret_entry->list.Blink;
 						PLIST_ENTRY next = ret_entry->list.Flink;
@@ -212,8 +212,25 @@ namespace trace
 					{
 						if (entry->name.Buffer && wcsstr(entry->name.Buffer, name))
 						{
-							unsigned long stamp = entry->stamp;
-							return clear_cache(name, stamp);
+							DbgPrintEx(0, 0, "[%s] removing %ws from PiDDBCacheTable\n", __FUNCTION__, entry->name.Buffer);
+
+							PLIST_ENTRY prev = entry->list.Blink;
+							PLIST_ENTRY next = entry->list.Flink;
+							if (prev && next)
+							{
+								prev->Flink = next;
+								next->Blink = prev;
+							}
+
+							if (RtlDeleteElementGenericTableAvl(table, entry))
+							{
+								if (table->DeleteCount > 0)
+									table->DeleteCount--;
+
+								status = true;
+							}
+
+							break;
 						}
 
 						entry = (ppiddb_cache_entry)RtlEnumerateGenericTableAvl(table, restart);
@@ -274,8 +291,8 @@ namespace trace
 			if (!MmIsAddressValid(unloaders_count))
 				return status;
 
-			DbgPrintEx(0, 0, "[%s] MmUnloadedDrivers value 0x%llx, count_ptr 0x%llx\n",
-				__FUNCTION__, unloaders, unloaders_count);
+			DbgPrintEx(0, 0, "[%s] MmUnloadedDrivers value %p, count_ptr %p\n",
+				__FUNCTION__, (PVOID)unloaders, (PVOID)unloaders_count);
 
 			if (!NT_SUCCESS(detail::ensure_unload_resource()))
 				return status;
@@ -358,37 +375,44 @@ namespace trace
 			{
 				__try
 				{
-					phash_bucket_entry current_entry = ((phash_bucket_entry)KernelHashBucketList)->next;
-					phash_bucket_entry prev_entry = (phash_bucket_entry)KernelHashBucketList;
-
-					while (current_entry)
+					// kdmapper 风格：g_KernelHashBucketList 是一个指向首节点指针的指针。
+					auto bucket_list = reinterpret_cast<phash_bucket_entry*>(KernelHashBucketList);
+					if (!bucket_list)
 					{
-						if (!current_entry->name.Buffer)
+						DbgPrintEx(0, 0, "[%s] invalid g_KernelHashBucketList pointer\n", __FUNCTION__);
+					}
+					else
+					{
+						phash_bucket_entry current_entry = *bucket_list;
+						phash_bucket_entry* prev_link = bucket_list;
+
+						while (current_entry)
 						{
-							prev_entry = current_entry;
-							current_entry = current_entry->next;
-							continue;
-						}
+							if (!current_entry->name.Buffer)
+							{
+								prev_link = &current_entry->next;
+								current_entry = current_entry->next;
+								continue;
+							}
 
-						DbgPrintEx(0, 0, "[%s] %ws 0x%x\n", __FUNCTION__, current_entry->name.Buffer, current_entry->hash[0]);
+							DbgPrintEx(0, 0, "[%s] %ws 0x%x\n", __FUNCTION__, current_entry->name.Buffer, current_entry->hash[0]);
 
-						if (wcsstr(current_entry->name.Buffer, name))
-						{
-							DbgPrintEx(0, 0, "[%s] found %ws driver \n", __FUNCTION__, current_entry->name.Buffer);
+							if (wcsstr(current_entry->name.Buffer, name))
+							{
+								DbgPrintEx(0, 0, "[%s] found %ws driver \n", __FUNCTION__, current_entry->name.Buffer);
 
-							prev_entry->next = current_entry->next;
+								*prev_link = current_entry->next;
 
-							current_entry->hash[0] = current_entry->hash[1] = 1;
-							current_entry->hash[2] = current_entry->hash[3] = 1;
-							utils::random_wstring(current_entry->name.Buffer, current_entry->name.Length / 2 - 4);
+								current_entry->hash[0] = current_entry->hash[1] = 1;
+								current_entry->hash[2] = current_entry->hash[3] = 1;
+								utils::random_wstring(current_entry->name.Buffer, current_entry->name.Length / 2 - 4);
 
-							ExFreePoolWithTag(current_entry, 0);
-							status = true;
-							break;
-						}
-						else
-						{
-							prev_entry = current_entry;
+								ExFreePoolWithTag(current_entry, 0);
+								status = true;
+								break;
+							}
+
+							prev_link = &current_entry->next;
 							current_entry = current_entry->next;
 						}
 					}

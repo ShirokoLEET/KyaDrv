@@ -15,48 +15,70 @@ typedef struct _LDR_DATA_TABLE_ENTRY {
     UNICODE_STRING BaseDllName;
 } LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
 
-
-
-BOOLEAN DeleteDriverFile(PUNICODE_STRING FilePath)
+BOOLEAN DeleteFile(PUNICODE_STRING FilePath)
 {
-    NTSTATUS status;
-    HANDLE fileHandle = NULL;
-    OBJECT_ATTRIBUTES objectAttributes;
-    IO_STATUS_BLOCK ioStatusBlock;
+	NTSTATUS ntstatus = NULL;
+	HANDLE hFile = NULL;
+	OBJECT_ATTRIBUTES obj = { 0 };
+	IO_STATUS_BLOCK IostaBlc = { 0 };
+	PFILE_OBJECT pFileObj = NULL;
 
+	InitializeObjectAttributes(&obj, FilePath, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
 
-    InitializeObjectAttributes(&objectAttributes,
-        FilePath,
-        OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE,
-        NULL, NULL);
+	
+	ntstatus = NtCreateFile(
+		&hFile,
+		FILE_READ_ACCESS,
+		&obj,
+		&IostaBlc,
+		NULL,
+		FILE_ATTRIBUTE_NORMAL,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 
+		FILE_OPEN,
+		FILE_NON_DIRECTORY_FILE,
+		NULL,
+		NULL
+	);
 
+	if (!NT_SUCCESS(ntstatus))
+	{
+		return FALSE;
+	}
 
-    status = ZwCreateFile(&fileHandle,
-        DELETE | SYNCHRONIZE,
-        &objectAttributes,
-        &ioStatusBlock,
-        NULL,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        FILE_OPEN,
-        FILE_DELETE_ON_CLOSE | FILE_SYNCHRONOUS_IO_NONALERT,
-        NULL, 0);
+	ntstatus = ObReferenceObjectByHandle(
+		hFile,
+		FILE_ANY_ACCESS,
+		*IoFileObjectType,
+		KernelMode,
+		(PVOID*)&pFileObj, 
+		NULL
+	);
+	
+	if (!NT_SUCCESS(ntstatus) || pFileObj == NULL)
+	{
 
-    if (!NT_SUCCESS(status))
-    {
-        DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
-            "DeleteDriverFile: ZwCreateFile failed with status 0x%X\n", status);
+		return FALSE;
+	}
 
-        return FALSE;
-    }
+	
 
-   
-    ZwClose(fileHandle);
+	pFileObj->DeletePending = 0;
+	pFileObj->DeleteAccess  = 1;
+	//pFileObj->SharedDelete  = 1;
+	pFileObj->SectionObjectPointer->DataSectionObject  = NULL;
+	pFileObj->SectionObjectPointer->ImageSectionObject = NULL;
+	//pFileObj->SectionObjectPointer->SharedCacheMap	   = NULL;
+	MmFlushImageSection(pFileObj->SectionObjectPointer, MmFlushForDelete);
 
-    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
-        "DeleteDriverFile: File deletion scheduled successfully\n");
-    return TRUE;
+	ntstatus = ZwDeleteFile(&obj);
+	if (pFileObj != NULL)
+	{
+		ObDereferenceObject(pFileObj);
+	}
+	ZwClose(hFile);
+	return NT_SUCCESS(ntstatus) ? TRUE : FALSE;
 }
+
 
 
 BOOLEAN DeleteSelfDriverFile(PDRIVER_OBJECT DriverObject)
@@ -78,8 +100,8 @@ BOOLEAN DeleteSelfDriverFile(PDRIVER_OBJECT DriverObject)
     }
 
 
-    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL,
+    DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
         "[+]DeleteSelfDriverFile: Attempting to delete %wZ\n", &ldrEntry->FullDllName);
 
-    return DeleteDriverFile(&ldrEntry->FullDllName);
+    return DeleteFile(&ldrEntry->FullDllName);
 }
