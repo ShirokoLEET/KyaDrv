@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36623.8 d17.14
+VisualStudioVersion = 17.14.36623.8
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KyaDrv", "KyaDrv.vcxproj", "{9E2EC8BC-91D3-9B42-907E-180884D5FFAA}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KyaDrv_r3", "KyaDrv_r3\KyaDrv_r3.vcxproj", "{093174AA-7CC8-4FE0-B785-759C76A6348C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -25,6 +27,14 @@ Global
 		{9E2EC8BC-91D3-9B42-907E-180884D5FFAA}.Release|x64.ActiveCfg = Release|x64
 		{9E2EC8BC-91D3-9B42-907E-180884D5FFAA}.Release|x64.Build.0 = Release|x64
 		{9E2EC8BC-91D3-9B42-907E-180884D5FFAA}.Release|x64.Deploy.0 = Release|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Debug|ARM64.ActiveCfg = Debug|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Debug|ARM64.Build.0 = Debug|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Debug|x64.ActiveCfg = Debug|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Debug|x64.Build.0 = Debug|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Release|ARM64.ActiveCfg = Release|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Release|ARM64.Build.0 = Release|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Release|x64.ActiveCfg = Release|x64
+		{093174AA-7CC8-4FE0-B785-759C76A6348C}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

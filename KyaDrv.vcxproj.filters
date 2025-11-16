@@ -22,5 +22,28 @@
     <ClCompile Include="DrvEntry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="cleaner.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="import.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="loader.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="trace.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="utils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

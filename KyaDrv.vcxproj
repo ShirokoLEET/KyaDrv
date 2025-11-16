@@ -115,10 +115,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DrvEntry.cpp" />
+    <ClCompile Include="loader.cpp" />
+    <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cleaner.hpp" />
     <ClInclude Include="import.hpp" />
+    <ClInclude Include="common.hpp" />
+    <ClInclude Include="loader.hpp" />
     <ClInclude Include="trace.hpp" />
     <ClInclude Include="utils.hpp" />
   </ItemGroup>
