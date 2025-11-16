@@ -6,7 +6,8 @@
 #include "trace.hpp"
 #include "cleaner.hpp"
 #include "loader.hpp"
-
+#pragma warning(push)
+#pragma warning(disable: 4996)
 #define DRIVER_PREFIX "KyaDrv: "
 
 #ifndef KYADRV_TAG
@@ -16,7 +17,89 @@
 namespace
 {
 	PDEVICE_OBJECT g_DeviceObject = nullptr;
-	UNICODE_STRING g_SymbolicLinkName = RTL_CONSTANT_STRING(KYADRV_DOS_DEVICE_NAME);
+	UNICODE_STRING g_DeviceName = {};
+	UNICODE_STRING g_SymbolicLinkName = {};
+
+	void FreeUnicodeStringBuffer(_Inout_ UNICODE_STRING& value)
+	{
+		if (!value.Buffer)
+			return;
+
+		ExFreePoolWithTag(value.Buffer, KYADRV_TAG);
+		value.Buffer = nullptr;
+		value.Length = 0;
+		value.MaximumLength = 0;
+	}
+
+	void ResetDeviceStrings()
+	{
+		FreeUnicodeStringBuffer(g_DeviceName);
+		FreeUnicodeStringBuffer(g_SymbolicLinkName);
+	}
+
+	NTSTATUS AllocatePrefixedName(_In_ const UNICODE_STRING& prefix, _In_ const UNICODE_STRING& baseName, _Out_ UNICODE_STRING& target)
+	{
+		const USHORT total_length = prefix.Length + baseName.Length;
+
+		target.MaximumLength = total_length + sizeof(WCHAR);
+		target.Buffer = static_cast<PWCH>(ExAllocatePoolWithTag(NonPagedPoolNx, target.MaximumLength, KYADRV_TAG));
+		if (!target.Buffer)
+		{
+			target.Length = 0;
+			target.MaximumLength = 0;
+			return STATUS_INSUFFICIENT_RESOURCES;
+		}
+
+		RtlZeroMemory(target.Buffer, target.MaximumLength);
+		RtlCopyMemory(target.Buffer, prefix.Buffer, prefix.Length);
+		RtlCopyMemory(reinterpret_cast<PUCHAR>(target.Buffer) + prefix.Length, baseName.Buffer, baseName.Length);
+		target.Length = total_length;
+		return STATUS_SUCCESS;
+	}
+
+	NTSTATUS BuildDeviceStrings(_In_ PDRIVER_OBJECT DriverObject)
+	{
+		UNICODE_STRING default_name = RTL_CONSTANT_STRING(L"KyaDrv");
+		UNICODE_STRING base_name = default_name;
+
+		if (DriverObject->DriverName.Buffer && DriverObject->DriverName.Length > 0)
+		{
+			base_name = DriverObject->DriverName;
+			const USHORT char_count = base_name.Length / sizeof(WCHAR);
+			USHORT start_index = 0;
+			for (USHORT i = 0; i < char_count; ++i)
+			{
+				if (base_name.Buffer[i] == L'\\')
+					start_index = static_cast<USHORT>(i + 1);
+			}
+
+			if (start_index < char_count)
+			{
+				base_name.Buffer += start_index;
+				base_name.Length -= start_index * sizeof(WCHAR);
+				base_name.MaximumLength = base_name.Length;
+			}
+
+			if (base_name.Length == 0)
+				base_name = default_name;
+		}
+
+		const UNICODE_STRING device_prefix = RTL_CONSTANT_STRING(L"\\Device\\");
+		const UNICODE_STRING dosdev_prefix = RTL_CONSTANT_STRING(L"\\DosDevices\\");
+
+		NTSTATUS status = AllocatePrefixedName(device_prefix, base_name, g_DeviceName);
+		if (!NT_SUCCESS(status))
+			return status;
+
+		status = AllocatePrefixedName(dosdev_prefix, base_name, g_SymbolicLinkName);
+		if (!NT_SUCCESS(status))
+		{
+			FreeUnicodeStringBuffer(g_DeviceName);
+			return status;
+		}
+
+		return STATUS_SUCCESS;
+	}
 }
 
 static const wchar_t kKyaDrvName[] = L"KyaDrv.sys";
@@ -34,7 +117,10 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 
 	loader::cleanup();
 
-	IoDeleteSymbolicLink(&g_SymbolicLinkName);
+	if (g_SymbolicLinkName.Buffer)
+	{
+		IoDeleteSymbolicLink(&g_SymbolicLinkName);
+	}
 
 	if (g_DeviceObject)
 	{
@@ -42,6 +128,7 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 		g_DeviceObject = nullptr;
 	}
 
+	ResetDeviceStrings();
 	trace::cleanup();
 	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "Driver unloaded successfully\n");
 }
@@ -84,20 +171,28 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	trace::clear_hash_bucket_list(target_name, target_full_name);
 	trace::clear_ci_ea_cache_lookaside_list();
 
-	UNICODE_STRING device_name = RTL_CONSTANT_STRING(KYADRV_NT_DEVICE_NAME);
-	NTSTATUS status = IoCreateDevice(DriverObject, 0, &device_name, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
+	NTSTATUS status = BuildDeviceStrings(DriverObject);
+	if (!NT_SUCCESS(status))
+	{
+		DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, DRIVER_PREFIX "Failed to build device names 0x%X\n", status);
+		return status;
+	}
+
+	status = IoCreateDevice(DriverObject, 0, &g_DeviceName, FILE_DEVICE_UNKNOWN, FILE_DEVICE_SECURE_OPEN, FALSE, &g_DeviceObject);
 	if (!NT_SUCCESS(status))
 	{
 		DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, DRIVER_PREFIX "IoCreateDevice failed 0x%X\n", status);
+		ResetDeviceStrings();
 		return status;
 	}
 
 	g_DeviceObject->Flags |= DO_BUFFERED_IO;
 	g_DeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
 
-	status = IoCreateSymbolicLink(&g_SymbolicLinkName, &device_name);
+	status = IoCreateSymbolicLink(&g_SymbolicLinkName, &g_DeviceName);
 	if (!NT_SUCCESS(status))
 	{
+		ResetDeviceStrings();
 		IoDeleteDevice(g_DeviceObject);
 		g_DeviceObject = nullptr;
 		return status;
@@ -107,6 +202,7 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	if (!NT_SUCCESS(status))
 	{
 		IoDeleteSymbolicLink(&g_SymbolicLinkName);
+		ResetDeviceStrings();
 		IoDeleteDevice(g_DeviceObject);
 		g_DeviceObject = nullptr;
 		return status;
@@ -153,7 +249,7 @@ NTSTATUS KyaDrvDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
 		if (NT_SUCCESS(status))
 		{
 			if (request->DriverName[0] != L'\0')
-			{
+			{	
 				trace::clear_cache_by_name(request->DriverName, nullptr);
 				trace::clear_unloaded_driver(request->DriverName, nullptr);
 				trace::clear_hash_bucket_list(request->DriverName, nullptr);

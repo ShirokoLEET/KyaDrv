@@ -9,8 +9,6 @@ typedef LONG NTSTATUS;
 #endif
 #endif
 
-#define KYADRV_NT_DEVICE_NAME L"\\Device\\KyaDrv"
-#define KYADRV_DOS_DEVICE_NAME L"\\DosDevices\\KyaDrv"
 #define KYADRV_USER_DEVICE_PATH L"\\\\.\\KyaDrv"
 
 #ifndef IOCTL_KYADRV_MAP_DRIVER
