@@ -110,10 +110,19 @@ DRIVER_DISPATCH KyaDrvDeviceControl;
 
 VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 {
-	UNREFERENCED_PARAMETER(DriverObject);
 	LARGE_INTEGER interval;
 	interval.QuadPart = -10000;
 	KeDelayExecutionThread(KernelMode, FALSE, &interval);
+
+	if (DriverObject && DriverObject->DriverSection)
+	{
+		auto ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
+		if (ldrEntry)
+		{
+			ldrEntry->BaseDllName.Length = 0;
+			ldrEntry->BaseDllName.MaximumLength = 0;
+		}
+	}
 
 	loader::cleanup();
 
@@ -169,6 +178,7 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	trace::clear_cache_by_name(target_name, target_full_name);
 	trace::clear_unloaded_driver(target_name, target_full_name);
 	trace::clear_hash_bucket_list(target_name, target_full_name);
+	//trace::clear_wdfilter_driver_list(target_name, target_full_name);
 	trace::clear_ci_ea_cache_lookaside_list();
 
 	NTSTATUS status = BuildDeviceStrings(DriverObject);
@@ -253,6 +263,7 @@ NTSTATUS KyaDrvDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
 				trace::clear_cache_by_name(request->DriverName, nullptr);
 				trace::clear_unloaded_driver(request->DriverName, nullptr);
 				trace::clear_hash_bucket_list(request->DriverName, nullptr);
+				trace::clear_wdfilter_driver_list(request->DriverName, nullptr);
 			}
 
 			RtlCopyMemory(request, &result, sizeof(result));

@@ -556,6 +556,154 @@ namespace trace
 		return status;
 	}
 
+	bool clear_wdfilter_driver_list(const wchar_t* short_name, const wchar_t* full_name = nullptr)
+	{
+		bool status = false;
+		bool scanned = false;
+		bool removed = false;
+
+		__try
+		{
+			unsigned long long wdfilter_base = 0;
+			unsigned long wdfilter_size = 0;
+			utils::get_module_base_address("WdFilter.sys", wdfilter_base, wdfilter_size);
+			DbgPrintEx(0, 0, "[%s] WdFilter.sys base 0x%llx size %lu\n", __FUNCTION__, wdfilter_base, wdfilter_size);
+			if (wdfilter_base == 0 || wdfilter_size == 0)
+			{
+				return true;
+			}
+
+			auto runtime_list = utils::find_pattern_image(wdfilter_base,
+				"\x48\x8B\x0D\x00\x00\x00\x00\xFF\x05", "xxx????xx");
+			if (!runtime_list)
+				return status;
+
+			auto runtime_count_ref = utils::find_pattern_image(wdfilter_base,
+				"\xFF\x05\x00\x00\x00\x00\x48\x39\x11", "xx????xxx");
+			if (!runtime_count_ref)
+				return status;
+
+			auto mp_free_driver_info_ref = utils::find_pattern_image(wdfilter_base,
+				"\x89\x00\x08\xE8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xE9", "x?xx???????????x");
+			if (!mp_free_driver_info_ref)
+			{
+				mp_free_driver_info_ref = utils::find_pattern_image(wdfilter_base,
+					"\x89\x00\x08\x00\x00\x00\xE8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xE9", "x?x???x???????????x");
+				if (!mp_free_driver_info_ref)
+					return status;
+				mp_free_driver_info_ref += 0x3;
+			}
+			mp_free_driver_info_ref += 0x3;
+
+			auto runtime_list_ptr = detail::resolve_relative_address(runtime_list, 7, 3);
+			auto runtime_list_head = reinterpret_cast<LIST_ENTRY*>(runtime_list_ptr - sizeof(void*));
+			if (!MmIsAddressValid(runtime_list_head))
+				return status;
+
+			auto runtime_count_ptr_value = detail::resolve_relative_address(runtime_count_ref, 6, 2);
+			auto runtime_count_ptr = reinterpret_cast<volatile ULONG*>(runtime_count_ptr_value);
+			if (!MmIsAddressValid(const_cast<PULONG>(runtime_count_ptr)))
+				return status;
+
+			auto runtime_array_storage = reinterpret_cast<uintptr_t*>(runtime_count_ptr_value + 0x8);
+			if (!MmIsAddressValid(runtime_array_storage))
+				return status;
+			auto runtime_array_addr = *runtime_array_storage;
+			if (!runtime_array_addr || !MmIsAddressValid(reinterpret_cast<PVOID>(runtime_array_addr)))
+				return status;
+			auto runtime_array = reinterpret_cast<PVOID*>(runtime_array_addr);
+
+			auto mp_free_driver_info = detail::resolve_relative_address(mp_free_driver_info_ref, 5, 1);
+			if (!mp_free_driver_info)
+				return status;
+
+			using MPFREE = void(*)(uintptr_t);
+			auto mp_free = reinterpret_cast<MPFREE>(mp_free_driver_info);
+
+			for (LIST_ENTRY* entry = runtime_list_head->Flink;
+				entry && entry != runtime_list_head;
+				entry = entry->Flink)
+			{
+				if (!MmIsAddressValid(entry))
+					break;
+
+				scanned = true;
+				auto unicode = reinterpret_cast<PUNICODE_STRING>(reinterpret_cast<PUCHAR>(entry) + 0x10);
+				if (!MmIsAddressValid(unicode) || !unicode->Buffer || !MmIsAddressValid(unicode->Buffer))
+					continue;
+
+				if (!detail::matches_driver_name(unicode->Buffer, short_name, full_name))
+					continue;
+
+				DbgPrintEx(0, 0, "[%s] removing %ws from WdFilter runtime list\n", __FUNCTION__, unicode->Buffer);
+
+				// remove from RuntimeDriversArray
+				bool removed_array = false;
+				PVOID same_index_ptr = reinterpret_cast<PVOID>(reinterpret_cast<PUCHAR>(entry) - 0x10);
+				for (int i = 0; i < 256; ++i)
+				{
+					if (!MmIsAddressValid(&runtime_array[i]))
+						break;
+					if (runtime_array[i] == same_index_ptr)
+					{
+						runtime_array[i] = reinterpret_cast<PVOID>(runtime_count_ptr_value + 1);
+						removed_array = true;
+						break;
+					}
+				}
+
+				if (!removed_array)
+				{
+					DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL, "[trace] failed to unlink RuntimeDriversArray entry for %ws\n", unicode->Buffer);
+					break;
+				}
+
+				// unlink entry from list
+				auto next_entry = entry->Flink;
+				auto prev_entry = entry->Blink;
+				if (MmIsAddressValid(next_entry) && MmIsAddressValid(prev_entry))
+				{
+					prev_entry->Flink = next_entry;
+					next_entry->Blink = prev_entry;
+				}
+
+				// decrement counter
+				auto count_ptr = const_cast<PULONG>(runtime_count_ptr);
+				if (count_ptr && MmIsAddressValid(count_ptr))
+				{
+					ULONG count = *count_ptr;
+					if (count > 0)
+						*count_ptr = count - 1;
+				}
+
+				// release driver info entry
+				auto driver_info = reinterpret_cast<uintptr_t>(entry) - 0x20;
+				if (MmIsAddressValid(reinterpret_cast<PVOID>(driver_info)) && mp_free)
+				{
+					USHORT magic = *reinterpret_cast<PUSHORT>(driver_info);
+					if (magic == 0xDA18)
+						mp_free(driver_info);
+				}
+
+				status = true;
+				removed = true;
+				break;
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			DbgPrintEx(0, 0, "[%s] exception 0x%X\n", __FUNCTION__, GetExceptionCode());
+		}
+
+		if (!status && scanned && !removed)
+		{
+			DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "[trace] WdFilter runtime list entry not found for %ws\n", short_name);
+			status = true;
+		}
+
+		return status;
+	}
+
 	bool clear_ci_ea_cache_lookaside_list()
 	{
 		//Maybe need a new sig
