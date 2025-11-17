@@ -8,6 +8,23 @@ extern "C" {
 #pragma warning(push)
 #pragma warning(disable: 4996)
 
+namespace
+{
+    constexpr size_t kSystemModuleImageNameLength = 256;
+    static_assert(sizeof(((SYSTEM_MODULE*)0)->ImageName) == kSystemModuleImageNameLength, "Unexpected SYSTEM_MODULE name length");
+
+    inline bool module_name_contains(const SYSTEM_MODULE& module, const char* needle)
+    {
+        if (!module.ImageName || !needle || *needle == '\0')
+            return false;
+
+        char name_buffer[kSystemModuleImageNameLength + 1] = {};
+        RtlCopyMemory(name_buffer, module.ImageName, kSystemModuleImageNameLength);
+        name_buffer[kSystemModuleImageNameLength] = '\0';
+        return strstr(name_buffer, needle) != nullptr;
+    }
+}
+
 namespace utils
 {
     PIMAGE_NT_HEADERS getNtHeader(PVOID base)
@@ -45,7 +62,7 @@ namespace utils
         for (unsigned long long i = 0; i < sys_mods->ulModuleCount; i++)
         {
             const SYSTEM_MODULE& mod = sys_mods->Modules[i];
-            if (strstr(mod.ImageName, name))
+            if (module_name_contains(mod, name))
             {
                 addr = reinterpret_cast<unsigned long long>(mod.Base);
                 size = static_cast<unsigned long>(mod.Size);
@@ -93,7 +110,13 @@ namespace utils
         for (unsigned short i = 0; i < nt->FileHeader.NumberOfSections; i++)
         {
             auto p = &section[i];
-            if (strstr(reinterpret_cast<const char*>(p->Name), ".text") || 'EGAP' == *reinterpret_cast<int*>(p->Name))
+            // IMAGE_SECTION_HEADER::Name is 8 bytes and may not be null terminated.
+            // Use bounded compares to avoid walking past the buffer (strstr may AV in kernel).
+            const bool is_text = (memcmp(p->Name, ".text", 5) == 0) || (memcmp(p->Name, ".TEXT", 5) == 0);
+            // "PAGE" literal may be stored without NUL; compare first 4 chars.
+            const bool is_page = (memcmp(p->Name, "PAGE", 4) == 0) || (memcmp(p->Name, "PagE", 4) == 0);
+
+            if (is_text || is_page)
             {
                 DWORD64 res = find_pattern(addr + p->VirtualAddress, p->Misc.VirtualSize, pattern, mask);
                 if (res) return res;

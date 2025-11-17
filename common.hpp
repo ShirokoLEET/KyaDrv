@@ -1,18 +1,16 @@
 #pragma once
 #ifdef _KERNEL_MODE
 #include <ntifs.h>
-#else
-#include <Windows.h>
-#include <winternl.h>
-#ifndef NTSTATUS
-typedef LONG NTSTATUS;
-#endif
 #endif
 
 #define KYADRV_USER_DEVICE_PATH L"\\\\.\\KyaDrv"
 
 #ifndef IOCTL_KYADRV_MAP_DRIVER
 #define IOCTL_KYADRV_MAP_DRIVER CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#endif
+
+#ifndef IOCTL_KYADRV_CLEAN_TRACES
+#define IOCTL_KYADRV_CLEAN_TRACES CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #endif
 
 #define KYADRV_MAX_DRIVER_NAME 260
@@ -35,3 +33,9 @@ typedef struct _KYADRV_MAP_RESULT
     ULONGLONG ImageSize;
     NTSTATUS EntryStatus;
 } KYADRV_MAP_RESULT, *PKYADRV_MAP_RESULT;
+
+typedef struct _KYADRV_CLEAN_REQUEST
+{
+    WCHAR VulnerableDriver[KYADRV_MAX_DRIVER_NAME];
+    WCHAR CheatDriver[KYADRV_MAX_DRIVER_NAME];
+} KYADRV_CLEAN_REQUEST, *PKYADRV_CLEAN_REQUEST;

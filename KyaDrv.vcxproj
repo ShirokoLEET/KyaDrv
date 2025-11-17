@@ -119,7 +119,6 @@
     <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="cleaner.hpp" />
     <ClInclude Include="import.hpp" />
     <ClInclude Include="common.hpp" />
     <ClInclude Include="loader.hpp" />

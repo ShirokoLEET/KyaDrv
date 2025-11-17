@@ -51,7 +51,7 @@ namespace trace
 				unload_resource_initialized() = true;
 			}
 
-			return STATUS_SUCCESS;
+			return STATUS_SUCCESS;	
 		}
 
 		inline void cleanup_resources()
@@ -209,6 +209,30 @@ namespace trace
 		{
 			return contains_name_insensitive(text, short_name) ||
 				(full_name && contains_name_insensitive(text, full_name));
+		}
+
+		template<size_t BufferCount>
+		inline bool copy_unicode_to_buffer(PUNICODE_STRING source, wchar_t(&buffer)[BufferCount])
+		{
+			static_assert(BufferCount > 1, "buffer must have room for terminator");
+			if (!source || !source->Buffer || source->Length == 0)
+				return false;
+
+			const SIZE_T max_bytes = (BufferCount - 1) * sizeof(WCHAR);
+			SIZE_T bytes_to_copy = source->Length;
+			if (bytes_to_copy > max_bytes)
+				bytes_to_copy = max_bytes;
+
+			MM_COPY_ADDRESS address{};
+			address.VirtualAddress = source->Buffer;
+			SIZE_T bytes_copied = 0;
+			NTSTATUS status = MmCopyMemory(buffer, address, bytes_to_copy, MM_COPY_MEMORY_VIRTUAL, &bytes_copied);
+			if (!NT_SUCCESS(status) || bytes_copied == 0)
+				return false;
+
+			const SIZE_T chars_written = bytes_copied / sizeof(WCHAR);
+			buffer[chars_written] = L'\0';
+			return true;
 		}
 	}
 
@@ -629,13 +653,17 @@ namespace trace
 
 				scanned = true;
 				auto unicode = reinterpret_cast<PUNICODE_STRING>(reinterpret_cast<PUCHAR>(entry) + 0x10);
-				if (!MmIsAddressValid(unicode) || !unicode->Buffer || !MmIsAddressValid(unicode->Buffer))
+				if (!MmIsAddressValid(unicode))
 					continue;
 
-				if (!detail::matches_driver_name(unicode->Buffer, short_name, full_name))
+				wchar_t unicode_buffer[512]{};
+				if (!detail::copy_unicode_to_buffer(unicode, unicode_buffer))
 					continue;
 
-				DbgPrintEx(0, 0, "[%s] removing %ws from WdFilter runtime list\n", __FUNCTION__, unicode->Buffer);
+				if (!detail::matches_driver_name(unicode_buffer, short_name, full_name))
+					continue;
+
+				DbgPrintEx(0, 0, "[%s] removing %ws from WdFilter runtime list\n", __FUNCTION__, unicode_buffer);
 
 				// remove from RuntimeDriversArray
 				bool removed_array = false;
@@ -646,7 +674,14 @@ namespace trace
 						break;
 					if (runtime_array[i] == same_index_ptr)
 					{
-						runtime_array[i] = reinterpret_cast<PVOID>(runtime_count_ptr_value + 1);
+						// Compact the array so WdFilter won't iterate over dangling pointers.
+						for (int j = i; j < 255; ++j)
+						{
+							runtime_array[j] = runtime_array[j + 1];
+							if (!runtime_array[j + 1])
+								break;
+						}
+						runtime_array[255] = nullptr;
 						removed_array = true;
 						break;
 					}

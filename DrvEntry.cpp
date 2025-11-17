@@ -4,7 +4,6 @@
 #include "utils.hpp"
 #include "common.hpp"
 #include "trace.hpp"
-#include "cleaner.hpp"
 #include "loader.hpp"
 #pragma warning(push)
 #pragma warning(disable: 4996)
@@ -103,6 +102,7 @@ namespace
 }
 
 static const wchar_t kKyaDrvName[] = L"KyaDrv.sys";
+static const wchar_t kNeacSafeName[] = L"NeacSafe64.sys";
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH KyaDrvIrpCreateClose;
@@ -124,8 +124,6 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 		}
 	}
 
-	loader::cleanup();
-
 	if (g_SymbolicLinkName.Buffer)
 	{
 		IoDeleteSymbolicLink(&g_SymbolicLinkName);
@@ -138,7 +136,6 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 	}
 
 	ResetDeviceStrings();
-	trace::cleanup();
 	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "Driver unloaded successfully\n");
 }
 
@@ -146,8 +143,6 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 {
 	UNREFERENCED_PARAMETER(RegistryPath);
 
-	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "DriverEntry -> clear self trace\n");
-	DeleteSelfDriverFile(DriverObject);
 
 	wchar_t name_buf[260] = { 0 };
 	wchar_t full_name_buf[512] = { 0 };
@@ -175,11 +170,6 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 		target_full_name = full_name_buf;
 	}
 
-	trace::clear_cache_by_name(target_name, target_full_name);
-	trace::clear_unloaded_driver(target_name, target_full_name);
-	trace::clear_hash_bucket_list(target_name, target_full_name);
-	//trace::clear_wdfilter_driver_list(target_name, target_full_name);
-	trace::clear_ci_ea_cache_lookaside_list();
 
 	NTSTATUS status = BuildDeviceStrings(DriverObject);
 	if (!NT_SUCCESS(status))
@@ -243,11 +233,11 @@ NTSTATUS KyaDrvDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
 	NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST;
 	ULONG_PTR information = 0;
 
-	switch (stack->Parameters.DeviceIoControl.IoControlCode)
-	{
-	case IOCTL_KYADRV_MAP_DRIVER:
-	{
-		if (stack->Parameters.DeviceIoControl.InputBufferLength < sizeof(loader::KYADRV_MAP_REQUEST))
+    switch (stack->Parameters.DeviceIoControl.IoControlCode)
+    {
+    case IOCTL_KYADRV_MAP_DRIVER:
+    {
+        if (stack->Parameters.DeviceIoControl.InputBufferLength < sizeof(loader::KYADRV_MAP_REQUEST))
 		{
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
@@ -256,25 +246,50 @@ NTSTATUS KyaDrvDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
 		auto request = reinterpret_cast<loader::KYADRV_MAP_REQUEST*>(Irp->AssociatedIrp.SystemBuffer);
 		loader::KYADRV_MAP_RESULT result{};
 		status = loader::map_image_from_request(request, stack->Parameters.DeviceIoControl.InputBufferLength, &result);
-		if (NT_SUCCESS(status))
-		{
-			if (request->DriverName[0] != L'\0')
-			{	
-				trace::clear_cache_by_name(request->DriverName, nullptr);
-				trace::clear_unloaded_driver(request->DriverName, nullptr);
-				trace::clear_hash_bucket_list(request->DriverName, nullptr);
-				trace::clear_wdfilter_driver_list(request->DriverName, nullptr);
-			}
+        if (NT_SUCCESS(status))
+        {
+            RtlCopyMemory(request, &result, sizeof(result));
+            information = sizeof(result);
+        }
+        break;
+    }
+    case IOCTL_KYADRV_CLEAN_TRACES:
+    {
+        if (stack->Parameters.DeviceIoControl.InputBufferLength < sizeof(KYADRV_CLEAN_REQUEST))
+        {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
 
-			RtlCopyMemory(request, &result, sizeof(result));
-			information = sizeof(result);
-		}
-		break;
-	}
-	default:
-		status = STATUS_INVALID_DEVICE_REQUEST;
-		break;
-	}
+        auto clean_req = reinterpret_cast<KYADRV_CLEAN_REQUEST*>(Irp->AssociatedIrp.SystemBuffer);
+
+        if (clean_req->VulnerableDriver[0] != L'\0')
+        {
+            trace::clear_cache_by_name(clean_req->VulnerableDriver, nullptr);
+            trace::clear_unloaded_driver(clean_req->VulnerableDriver, nullptr);
+            trace::clear_hash_bucket_list(clean_req->VulnerableDriver, nullptr);
+            //trace::clear_wdfilter_driver_list(clean_req->VulnerableDriver, nullptr);
+        }
+
+        if (clean_req->CheatDriver[0] != L'\0')
+        {
+            trace::clear_cache_by_name(clean_req->CheatDriver, nullptr);
+            trace::clear_unloaded_driver(clean_req->CheatDriver, nullptr);
+            trace::clear_hash_bucket_list(clean_req->CheatDriver, nullptr);
+            //trace::clear_wdfilter_driver_list(clean_req->CheatDriver, nullptr);
+        }
+
+        // CI cache 只需清一次
+        trace::clear_ci_ea_cache_lookaside_list();
+
+        status = STATUS_SUCCESS;
+        information = sizeof(KYADRV_CLEAN_REQUEST);
+        break;
+    }
+    default:
+        status = STATUS_INVALID_DEVICE_REQUEST;
+        break;
+    }
 
 	Irp->IoStatus.Status = status;
 	Irp->IoStatus.Information = information;
