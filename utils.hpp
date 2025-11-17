@@ -8,6 +8,8 @@
 
 namespace utils
 {
+    void destroyPEHeader(PVOID image_base);
+
     PIMAGE_NT_HEADERS getNtHeader(PVOID base);
 
     bool get_module_base_address(const char* name, unsigned long long& addr, unsigned long& size);
