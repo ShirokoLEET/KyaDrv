@@ -5,6 +5,7 @@
 #include "common.hpp"
 #include "trace.hpp"
 #include "loader.hpp"
+
 #pragma warning(push)
 #pragma warning(disable: 4996)
 #define DRIVER_PREFIX "KyaDrv: "
