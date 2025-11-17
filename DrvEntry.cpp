@@ -151,28 +151,67 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	const wchar_t* target_full_name = nullptr;
 
 
-	PLDR_DATA_TABLE_ENTRY ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
-	if (ldrEntry && ldrEntry->BaseDllName.Buffer && ldrEntry->BaseDllName.Length > 0)
+	PLDR_DATA_TABLE_ENTRY ldrEntry = nullptr;
+	if (DriverObject && DriverObject->DriverSection)
 	{
-		size_t count = ldrEntry->BaseDllName.Length / sizeof(wchar_t);
-		const size_t buf_cap = RTL_NUMBER_OF(name_buf);
-		if (count >= buf_cap)
-			count = buf_cap - 1;
+		ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
+
 	
-		RtlCopyMemory(name_buf, ldrEntry->BaseDllName.Buffer, count * sizeof(wchar_t));
-		name_buf[count] = L'\0';
-		target_name = name_buf;
-	}
-	if (ldrEntry && ldrEntry->FullDllName.Buffer && ldrEntry->FullDllName.Length > 0)
-	{
-		size_t count = ldrEntry->FullDllName.Length / sizeof(wchar_t);
-		const size_t buf_cap = RTL_NUMBER_OF(full_name_buf);
-		if (count >= buf_cap)
-			count = buf_cap - 1;
+		if (MmIsAddressValid(ldrEntry))
+		{
+			
+			if (MmIsAddressValid(&ldrEntry->BaseDllName) &&
+				ldrEntry->BaseDllName.Buffer &&
+				ldrEntry->BaseDllName.Length > 0 &&
+				MmIsAddressValid(ldrEntry->BaseDllName.Buffer))
+			{
+				size_t count = ldrEntry->BaseDllName.Length / sizeof(wchar_t);
+				const size_t buf_cap = RTL_NUMBER_OF(name_buf);
+				if (count >= buf_cap)
+					count = buf_cap - 1;
+
+			
+				if (count > 0 && count < buf_cap)
+				{
+					__try
+					{
+						RtlCopyMemory(name_buf, ldrEntry->BaseDllName.Buffer, count * sizeof(wchar_t));
+						name_buf[count] = L'\0';
+						target_name = name_buf;
+					}
+					__except (EXCEPTION_EXECUTE_HANDLER)
+					{
+						DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, DRIVER_PREFIX "Failed to copy base DLL name\n");
+					}
+				}
+			}
+
 		
-		RtlCopyMemory(full_name_buf, ldrEntry->FullDllName.Buffer, count * sizeof(wchar_t));
-		full_name_buf[count] = L'\0';
-		target_full_name = full_name_buf;
+			if (MmIsAddressValid(&ldrEntry->FullDllName) &&
+				ldrEntry->FullDllName.Buffer &&
+				ldrEntry->FullDllName.Length > 0 &&
+				MmIsAddressValid(ldrEntry->FullDllName.Buffer))
+			{
+				size_t count = ldrEntry->FullDllName.Length / sizeof(wchar_t);
+				const size_t buf_cap = RTL_NUMBER_OF(full_name_buf);
+				if (count >= buf_cap)
+					count = buf_cap - 1;
+
+				if (count > 0 && count < buf_cap)
+				{
+					__try
+					{
+						RtlCopyMemory(full_name_buf, ldrEntry->FullDllName.Buffer, count * sizeof(wchar_t));
+						full_name_buf[count] = L'\0';
+						target_full_name = full_name_buf;
+					}
+					__except (EXCEPTION_EXECUTE_HANDLER)
+					{
+						DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL, DRIVER_PREFIX "Failed to copy full DLL name\n");
+					}
+				}
+			}
+		}
 	}
 
 	NTSTATUS status = BuildDeviceStrings(DriverObject);
