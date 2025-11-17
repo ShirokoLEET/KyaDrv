@@ -1,8 +1,8 @@
 ﻿#include <ntifs.h>
 #include <ntddk.h>
 
+#include "common.hpp" 
 #include "utils.hpp"
-#include "common.hpp"
 #include "trace.hpp"
 #include "loader.hpp"
 
@@ -115,6 +115,7 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 	interval.QuadPart = -10000;
 	KeDelayExecutionThread(KernelMode, FALSE, &interval);
 
+
 	if (DriverObject && DriverObject->DriverSection)
 	{
 		auto ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
@@ -137,25 +138,27 @@ VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 	}
 
 	ResetDeviceStrings();
-	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "Driver unloaded successfully\n");
+	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "[KyaDrv]Driver unloaded successfully\n");
 }
 
 extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
 	UNREFERENCED_PARAMETER(RegistryPath);
 
-
 	wchar_t name_buf[260] = { 0 };
 	wchar_t full_name_buf[512] = { 0 };
 	const wchar_t* target_name = kKyaDrvName;
 	const wchar_t* target_full_name = nullptr;
-	PLDR_DATA_TABLE_ENTRY ldrEntry = (PLDR_DATA_TABLE_ENTRY)DriverObject->DriverSection;
+
+
+	PLDR_DATA_TABLE_ENTRY ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
 	if (ldrEntry && ldrEntry->BaseDllName.Buffer && ldrEntry->BaseDllName.Length > 0)
 	{
 		size_t count = ldrEntry->BaseDllName.Length / sizeof(wchar_t);
 		const size_t buf_cap = RTL_NUMBER_OF(name_buf);
 		if (count >= buf_cap)
 			count = buf_cap - 1;
+	
 		RtlCopyMemory(name_buf, ldrEntry->BaseDllName.Buffer, count * sizeof(wchar_t));
 		name_buf[count] = L'\0';
 		target_name = name_buf;
@@ -166,11 +169,11 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 		const size_t buf_cap = RTL_NUMBER_OF(full_name_buf);
 		if (count >= buf_cap)
 			count = buf_cap - 1;
+		
 		RtlCopyMemory(full_name_buf, ldrEntry->FullDllName.Buffer, count * sizeof(wchar_t));
 		full_name_buf[count] = L'\0';
 		target_full_name = full_name_buf;
 	}
-
 
 	NTSTATUS status = BuildDeviceStrings(DriverObject);
 	if (!NT_SUCCESS(status))

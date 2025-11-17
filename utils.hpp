@@ -6,6 +6,16 @@
 #pragma warning(push)
 #pragma warning(disable: 4996)
 
+typedef struct _LDR_DATA_TABLE_ENTRY {
+    LIST_ENTRY InLoadOrderLinks; 
+    PVOID DllBase; 
+    PVOID EntryPoint; 
+    ULONG SizeOfImage; 
+    UNICODE_STRING FullDllName; 
+    UNICODE_STRING BaseDllName; 
+} LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
+
+
 namespace utils
 {
     void destroyPEHeader(PVOID image_base);
