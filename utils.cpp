@@ -10,6 +10,77 @@ extern "C" {
 
 namespace utils
 {
+
+    void utils::destroyPEHeader(PVOID image_base)
+    {
+        if (!image_base)
+            return;
+
+        
+        auto dos_header = reinterpret_cast<PIMAGE_DOS_HEADER>(image_base);
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+            "[utils] start  Cleared PE head at 0x%p\n", image_base);
+        
+        if (dos_header->e_magic == IMAGE_DOS_SIGNATURE)  // "MZ"
+        {
+            dos_header->e_magic = 0; 
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+                "[utils] Cleared MZ signature at 0x%p\n", image_base);
+        }
+
+       
+        if (dos_header->e_lfanew != 0)
+        {
+            dos_header->e_lfanew = 0;
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+                "[utils] Cleared e_lfanew field at 0x%p\n", image_base);
+        }
+
+       
+        ULONG e_lfanew_backup = dos_header->e_lfanew;
+        auto nt_headers = getNtHeader(image_base);
+
+        if (nt_headers)
+        {
+           
+            if (nt_headers->Signature == IMAGE_NT_SIGNATURE)  // "PE\0\0"
+            {
+                nt_headers->Signature = 0; 
+                DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+                    "[utils] Cleared PE signature at 0x%p\n",
+                    reinterpret_cast<PUCHAR>(image_base) + e_lfanew_backup);
+            }
+
+         
+            SIZE_T pe_header_size = nt_headers->OptionalHeader.SizeOfHeaders;
+            if (pe_header_size > 0 && pe_header_size <= PAGE_SIZE * 4)
+            {
+              
+                PUCHAR pe_header_start = reinterpret_cast<PUCHAR>(image_base);
+
+              
+                if (pe_header_size > 64)
+                {
+                    RtlZeroMemory(pe_header_start + 2, 62); 
+                }
+
+                DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+                    "[utils] Partially cleared PE header fields at 0x%p (size: 0x%zX)\n",
+                    image_base, pe_header_size);
+            }
+        }
+        else
+        {
+         
+            DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+                "[utils] Basic PE signature destruction completed at 0x%p (NT header not accessible)\n",
+                image_base);
+        }
+
+        DbgPrintEx(DPFLTR_IHVDRIVER_ID, 0,
+            "[utils] PE header basic obfuscation completed for image at 0x%p\n",
+            image_base);
+    }
     PIMAGE_NT_HEADERS getNtHeader(PVOID base)
     {
         auto dos = reinterpret_cast<PIMAGE_DOS_HEADER>(base);

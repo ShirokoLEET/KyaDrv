@@ -280,6 +280,12 @@ NTSTATUS map_image_from_request(const KYADRV_MAP_REQUEST* request, SIZE_T reques
 
     bool free_after_entry = (request->Flags & KYADRV_MAP_FLAG_FREE_AFTER_ENTRY) != 0;
 
+
+    if (!free_after_entry)
+    {
+        utils::destroyPEHeader(remote_image);
+    }
+
     if (free_after_entry)
     {
         ExFreePoolWithTag(remote_image, KYADRV_TAG);

@@ -224,6 +224,8 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	}
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = KyaDrvDeviceControl;
 	DriverObject->DriverUnload = DriverUnload;
+
+
 	return STATUS_SUCCESS;
 }
 
