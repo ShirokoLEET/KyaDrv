@@ -25,11 +25,11 @@
     <ClCompile Include="loader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="cleaner.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="import.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>

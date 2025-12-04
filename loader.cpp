@@ -31,8 +31,24 @@ static void free_mapped_driver(_In_ KYADRV_MAPPED_DRIVER* entry)
 {
     if (!entry)
         return;
-    if (entry->BaseAddress)
-        ExFreePoolWithTag(entry->BaseAddress, KYADRV_TAG);
+
+    KIRQL currentIrql = KeGetCurrentIrql();
+
+    if (currentIrql > APC_LEVEL) {
+       
+        LARGE_INTEGER interval;
+        interval.QuadPart = -10000; 
+        KeDelayExecutionThread(KernelMode, FALSE, &interval);
+    }
+
+    if (entry->BaseAddress) {
+  
+        if (MmIsAddressValid(entry->BaseAddress)) {
+            ExFreePoolWithTag(entry->BaseAddress, KYADRV_TAG);
+        }
+    }
+
+
     if (entry->Name.Buffer)
         ExFreePoolWithTag(entry->Name.Buffer, KYADRV_TAG);
     ExFreePoolWithTag(entry, KYADRV_TAG);
@@ -51,14 +67,41 @@ void cleanup()
     if (!g_loader_initialized)
         return;
 
+ 
+    KIRQL oldIrql = KeGetCurrentIrql();
+    if (oldIrql > APC_LEVEL) {
+     
+        LARGE_INTEGER interval;
+        interval.QuadPart = -100000; 
+        KeDelayExecutionThread(KernelMode, FALSE, &interval);
+    }
+
     ExAcquireFastMutex(&g_mapped_lock);
+
+   
     while (!IsListEmpty(&g_mapped_drivers))
     {
-        auto entry = CONTAINING_RECORD(RemoveHeadList(&g_mapped_drivers), KYADRV_MAPPED_DRIVER, Link);
+        LIST_ENTRY* entry = RemoveHeadList(&g_mapped_drivers);
         ExReleaseFastMutex(&g_mapped_lock);
-        free_mapped_driver(entry);
+
+        auto mapped_entry = CONTAINING_RECORD(entry, KYADRV_MAPPED_DRIVER, Link);
+
+    
+        if (KeGetCurrentIrql() > APC_LEVEL) {
+   
+            PVOID context = ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(KYADRV_MAPPED_DRIVER*), KYADRV_TAG);
+            if (context) {
+                *(KYADRV_MAPPED_DRIVER**)context = mapped_entry;
+                ExQueueWorkItem((PWORK_QUEUE_ITEM)context, DelayedWorkQueue);
+            }
+        }
+        else {
+            free_mapped_driver(mapped_entry);
+        }
+
         ExAcquireFastMutex(&g_mapped_lock);
     }
+
     ExReleaseFastMutex(&g_mapped_lock);
     g_loader_initialized = false;
 }

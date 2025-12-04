@@ -1,6 +1,21 @@
 #pragma once
 
 constexpr unsigned int max_unloader_driver = 50;
+
+
+typedef struct _SYSTEM_HANDLE
+{
+	PVOID Object;
+	HANDLE UniqueProcessId;
+	HANDLE HandleValue;
+	ULONG GrantedAccess;
+	USHORT CreatorBackTraceIndex;
+	USHORT ObjectTypeIndex;
+	ULONG HandleAttributes;
+	ULONG Reserved;
+} SYSTEM_HANDLE, * PSYSTEM_HANDLE;
+
+
 typedef struct _unloader_information
 {
 	UNICODE_STRING name;
@@ -56,8 +71,23 @@ namespace trace
 
 		inline void cleanup_resources()
 		{
+			if (KeGetCurrentIrql() > PASSIVE_LEVEL) {
+				LARGE_INTEGER interval;
+				interval.QuadPart = -100000; 
+				KeDelayExecutionThread(KernelMode, FALSE, &interval);
+			}
+
 			if (unload_resource_initialized())
 			{
+			
+				KIRQL oldIrql = KeGetCurrentIrql();
+				if (oldIrql > PASSIVE_LEVEL) {
+					
+					LARGE_INTEGER interval;
+					interval.QuadPart = -100000;
+					KeDelayExecutionThread(KernelMode, FALSE, &interval);
+				}
+
 				ExDeleteResourceLite(&unload_resource());
 				unload_resource_initialized() = false;
 			}
@@ -781,6 +811,11 @@ namespace trace
 		}
 
 		return status;
+	}
+
+	bool clear_mm_unloaded_drivers()
+	{
+		return true;
 	}
 
 	inline void cleanup()

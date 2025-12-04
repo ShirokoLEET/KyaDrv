@@ -109,36 +109,79 @@ DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH KyaDrvIrpCreateClose;
 DRIVER_DISPATCH KyaDrvDeviceControl;
 
+VOID CleanupWorkItemRoutine(_In_ PVOID Parameter)
+{
+	PWORK_QUEUE_ITEM workItem = (PWORK_QUEUE_ITEM)Parameter;
+	PVOID context = workItem->Parameter;
+
+	if (context) {
+		PDEVICE_OBJECT deviceObject = *(PDEVICE_OBJECT*)context;
+		if (deviceObject) {
+			if (g_SymbolicLinkName.Buffer) {
+				IoDeleteSymbolicLink(&g_SymbolicLinkName);
+			}
+			IoDeleteDevice(deviceObject);
+		}
+		ExFreePoolWithTag(context, KYADRV_TAG);
+	}
+
+	ExFreePoolWithTag(workItem, KYADRV_TAG);
+}
+
 VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject)
 {
-	LARGE_INTEGER interval;
-	interval.QuadPart = -10000;
-	KeDelayExecutionThread(KernelMode, FALSE, &interval);
+	UNREFERENCED_PARAMETER(DriverObject);
 
+	KIRQL currentIrql = KeGetCurrentIrql();
 
-	if (DriverObject && DriverObject->DriverSection)
-	{
-		auto ldrEntry = reinterpret_cast<PLDR_DATA_TABLE_ENTRY>(DriverObject->DriverSection);
-		if (ldrEntry)
-		{
-			ldrEntry->BaseDllName.Length = 0;
-			ldrEntry->BaseDllName.MaximumLength = 0;
+	if (currentIrql > PASSIVE_LEVEL) {
+	
+		PWORK_QUEUE_ITEM workItem = (PWORK_QUEUE_ITEM)ExAllocatePoolWithTag(
+			NonPagedPoolNx, sizeof(WORK_QUEUE_ITEM), KYADRV_TAG);
+
+		if (workItem) {
+			PVOID context = ExAllocatePoolWithTag(NonPagedPoolNx,
+				sizeof(PDEVICE_OBJECT) + sizeof(UNICODE_STRING), KYADRV_TAG);
+
+			if (context) {
+				PDEVICE_OBJECT* devicePtr = (PDEVICE_OBJECT*)context;
+				UNICODE_STRING* symLinkPtr = (UNICODE_STRING*)((PUCHAR)context + sizeof(PDEVICE_OBJECT));
+
+				*devicePtr = g_DeviceObject;
+				RtlCopyMemory(symLinkPtr, &g_SymbolicLinkName, sizeof(UNICODE_STRING));
+
+				ExInitializeWorkItem(workItem, CleanupWorkItemRoutine, context);
+				ExQueueWorkItem(workItem, DelayedWorkQueue);
+
+				
+				LARGE_INTEGER interval;
+				interval.QuadPart = -1000000; 
+				KeDelayExecutionThread(KernelMode, FALSE, &interval);
+			}
+			else {
+				ExFreePoolWithTag(workItem, KYADRV_TAG);
+			}
+		}
+	}
+	else {
+		
+		if (g_SymbolicLinkName.Buffer) {
+			IoDeleteSymbolicLink(&g_SymbolicLinkName);
+		}
+
+		if (g_DeviceObject) {
+			IoDeleteDevice(g_DeviceObject);
+			g_DeviceObject = nullptr;
 		}
 	}
 
-	if (g_SymbolicLinkName.Buffer)
-	{
-		IoDeleteSymbolicLink(&g_SymbolicLinkName);
-	}
-
-	if (g_DeviceObject)
-	{
-		IoDeleteDevice(g_DeviceObject);
-		g_DeviceObject = nullptr;
-	}
-
+	
+	loader::cleanup();
+	trace::cleanup();
 	ResetDeviceStrings();
-	DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, DRIVER_PREFIX "[KyaDrv]Driver unloaded successfully\n");
+
+	DbgPrintEx(DPFLTR_IHVDRIVER_ID,0,
+		DRIVER_PREFIX "[KyaDrv] Driver unloaded successfully at IRQL: %d\n", currentIrql);
 }
 
 extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
